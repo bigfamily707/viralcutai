@@ -30,7 +30,7 @@ const Pricing: React.FC = () => {
         <div className="bg-slate-900 border-2 border-purple-600 rounded-2xl p-8 relative transform md:-translate-y-4">
           <div className="absolute top-0 right-0 bg-purple-600 text-white text-xs font-bold px-3 py-1 rounded-bl-xl rounded-tr-lg">POPULAR</div>
           <h3 className="text-xl font-semibold text-white mb-2">Influencer</h3>
-          <div className="text-4xl font-bold text-white mb-6">$29<span className="text-lg text-slate-500 font-normal">/mo</span></div>
+          <div className="text-4xl font-bold text-white mb-6">$19<span className="text-lg text-slate-500 font-normal">/mo</span></div>
           <p className="text-slate-400 text-sm mb-8">For serious creators who post daily content.</p>
           <button className="w-full py-3 rounded-xl bg-purple-600 text-white font-bold hover:bg-purple-500 transition-colors mb-8 shadow-lg shadow-purple-900/20">
             Start Free Trial
