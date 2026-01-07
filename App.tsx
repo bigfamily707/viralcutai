@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { 
   Sparkles, 
   Settings, 
@@ -551,6 +552,9 @@ In this demo, the preview player simulated the cut by looping the video segment.
           onDownload={handleDownload}
         />
       )}
+
+      {/* Vercel Speed Insights */}
+      <SpeedInsights />
     </div>
   );
 };
