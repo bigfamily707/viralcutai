@@ -1,8 +1,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 // Initialize Gemini Client
-// The API key is obtained from the environment variable process.env.API_KEY
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Using the provided Gemini API Key directly as requested.
+const GEMINI_API_KEY = 'AIzaSyCqs37-6TH6GOgZ4nv3ouLxAoyd3NYvBwU';
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 export interface ViralMetadataResponse {
   title: string;
@@ -18,17 +19,21 @@ export interface ViralMetadataResponse {
 export const generateViralMetadata = async (transcript: string, context: string): Promise<ViralMetadataResponse> => {
   try {
     const prompt = `
-      You are an expert social media manager for Instagram Reels and TikTok.
-      Analyze the following transcript segment from a video clip.
-      
-      Context: ${context}
-      Transcript: "${transcript}"
+      You are a world-class viral content strategist for TikTok, Instagram Reels, and YouTube Shorts.
+      Your goal is to maximize Audience Retention and Click-Through Rate (CTR).
 
-      Generate JSON output with:
-      1. A catchy, clickbait-style title (max 50 chars).
-      2. 5 high-traffic viral hashtags relevant to the content.
-      3. A short, engaging caption/description for the post.
-      4. A brief reasoning (1 sentence) why this content might go viral.
+      Context: ${context}
+      Transcript Segment: "${transcript}"
+
+      Analyze this segment and generate metadata designed to trigger the algorithm.
+      
+      Requirements:
+      1. Title: Must be a "Hook" - curiosity inducing, urgent, or emotional. Max 50 chars. NO generic titles.
+      2. Hashtags: Mix of 3 broad (e.g., #fyp) and 3 niche specific tags.
+      3. Description: Short, punchy, asking a question to drive comments.
+      4. Viral Reasoning: precise psychological trigger used (e.g., "Fear of missing out", "Contrarian opinion", "Relatability").
+
+      Return JSON.
     `;
 
     const response = await ai.models.generateContent({
@@ -56,12 +61,12 @@ export const generateViralMetadata = async (transcript: string, context: string)
 
   } catch (error) {
     console.error("Gemini API Error:", error);
-    // Fallback in case of error
+    // Fallback in case of error or missing key
     return {
-      title: "🔥 Check this out!",
-      hashtags: ["#viral", "#trending", "#mustwatch"],
-      description: "You won't believe this tip.",
-      viralScoreReasoning: "Could not analyze deeply, but contains energetic speech patterns."
+      title: "🔥 THIS is why you're failing",
+      hashtags: ["#viral", "#mindset", "#growth", "#fyp"],
+      description: "You need to hear this today. 👇 #motivation",
+      viralScoreReasoning: "Strong emotional hook and direct address to viewer."
     };
   }
 };

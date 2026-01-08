@@ -6,7 +6,9 @@ export enum AppStep {
 }
 
 export enum AppView {
-  HOME = 'HOME',
+  LANDING = 'LANDING',
+  AUTH = 'AUTH',
+  WORKSPACE = 'WORKSPACE',
   TEMPLATES = 'TEMPLATES',
   PRICING = 'PRICING',
   SHOWCASE = 'SHOWCASE'
@@ -16,6 +18,15 @@ export enum AspectRatio {
   PORTRAIT_9_16 = '9:16',
   SQUARE_1_1 = '1:1',
   LANDSCAPE_16_9 = '16:9'
+}
+
+export type UserPlan = 'free' | 'pro' | 'agency';
+export type BillingCycle = 'monthly' | 'annual';
+
+export interface User {
+  name: string;
+  email: string;
+  plan: UserPlan;
 }
 
 export interface VideoClip {
@@ -29,6 +40,7 @@ export interface VideoClip {
   transcript: string;
   startTime: number;
   endTime: number;
+  videoUrl?: string;
 }
 
 export interface ProcessingConfig {

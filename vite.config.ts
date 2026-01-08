@@ -8,6 +8,20 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     define: {
       'process.env.API_KEY': JSON.stringify(env.API_KEY)
+    },
+    server: {
+      proxy: {
+        '/api': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/generated': {
+           target: 'http://localhost:3001',
+           changeOrigin: true,
+           secure: false,
+        }
+      }
     }
   };
 });
