@@ -2,12 +2,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 
 // Initialize Gemini Client
 // The API key is obtained from the environment variable process.env.API_KEY
-// Fallback to the provided key if process.env.API_KEY is not set
-const apiKey = process.env.API_KEY || 'AIzaSyCqs37-6TH6GOgZ4nv3ouLxAoyd3NYvBwU';
-const ai = new GoogleGenAI({ apiKey: apiKey });
-
-// Helper to check if API key is present (for UI feedback)
-export const hasApiKey = (): boolean => !!apiKey && apiKey !== 'dummy-key';
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export interface ViralMetadataResponse {
   title: string;
@@ -21,21 +16,6 @@ export interface ViralMetadataResponse {
  * Real implementation would process the actual video or audio chunks.
  */
 export const generateViralMetadata = async (transcript: string, context: string): Promise<ViralMetadataResponse> => {
-  // If no valid key is present (should not happen with the hardcoded fallback, but good safety)
-  if (!apiKey || apiKey === 'dummy-key') {
-    console.warn("No valid API Key found. Returning mock data.");
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({
-          title: "🚀 Productivity Hack Revealed!",
-          hashtags: ["#productivity", "#lifehacks", "#growthmindset", "#success"],
-          description: "Stop waking up at 5AM! Do this instead to triple your output. 🤯",
-          viralScoreReasoning: "Strong hook in the first 3 seconds, contrarian viewpoint ('not 5 AM'), and specific actionable advice."
-        });
-      }, 1500);
-    });
-  }
-
   try {
     const prompt = `
       You are an expert social media manager for Instagram Reels and TikTok.

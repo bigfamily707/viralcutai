@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Analytics } from '@vercel/analytics/react';
 import { 
   Sparkles, 
   Settings, 
@@ -552,8 +551,6 @@ In this demo, the preview player simulated the cut by looping the video segment.
           onDownload={handleDownload}
         />
       )}
-
-      <Analytics />
     </div>
   );
 };
