@@ -1,6 +1,7 @@
 import { VideoClip, AspectRatio } from '../types';
 
-const API_BASE = ''; // Proxied via Vite
+// For Vercel deployment, we simulate the backend processing client-side.
+// The actual FFmpeg cutting is replaced by logic in VideoModal that plays specific timestamp ranges.
 
 export interface UploadResponse {
   filename: string;
@@ -8,28 +9,28 @@ export interface UploadResponse {
   type: 'local' | 'url' | 'youtube';
 }
 
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const uploadVideo = async (file: File): Promise<UploadResponse> => {
-  const formData = new FormData();
-  formData.append('video', file);
-
-  const response = await fetch(`${API_BASE}/api/upload`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!response.ok) throw new Error('Upload failed');
-  return response.json();
+  // Simulate network upload delay
+  await delay(1500);
+  
+  return {
+    filename: file.name,
+    path: URL.createObjectURL(file), // Use Blob URL for local preview
+    type: 'local'
+  };
 };
 
 export const importVideoUrl = async (url: string): Promise<UploadResponse> => {
-  const response = await fetch(`${API_BASE}/api/import-url`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  });
+  // Simulate checking URL validity
+  await delay(1000);
 
-  if (!response.ok) throw new Error('Import failed');
-  return response.json();
+  return {
+    filename: 'imported_video',
+    path: url,
+    type: 'url'
+  };
 };
 
 export const processVideoClips = async (
@@ -37,17 +38,17 @@ export const processVideoClips = async (
   clips: VideoClip[], 
   aspectRatio: AspectRatio
 ): Promise<VideoClip[]> => {
-  const response = await fetch(`${API_BASE}/api/process-clips`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
-      sourceFilename, 
-      clips,
-      aspectRatio 
-    }),
-  });
+  // Simulate FFmpeg processing time (approx 2s per clip)
+  const processingTime = Math.min(clips.length * 2000, 8000); 
+  await delay(processingTime);
 
-  if (!response.ok) throw new Error('Processing failed');
-  const data = await response.json();
-  return data.clips;
+  // Return the clips. 
+  // Note: In this client-side demo version, we don't generate physical .mp4 files.
+  // The VideoModal component uses startTime/endTime to play the correct segment.
+  return clips.map(clip => ({
+    ...clip,
+    // We leave videoUrl undefined here so the App uses the original source + timestamps
+    // or we could generate blob URLs if we had an in-browser WASM ffmpeg implementation.
+    videoUrl: undefined 
+  }));
 };
