@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, User as UserIcon, ArrowRight, Github, Chrome, AlertCircle } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, ArrowRight, Github, Chrome, AlertCircle, Info } from 'lucide-react';
 import { User } from '../types';
 import { supabase } from '../services/supabaseClient';
 
@@ -19,6 +19,38 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode = 'login' }) => 
     email: '',
     password: ''
   });
+
+  const getFriendlyErrorMessage = (errorMsg: string) => {
+    if (errorMsg.includes('provider is not enabled')) {
+      return "This login method (Google/GitHub) is not enabled in your Supabase project. Please enable it in the dashboard or use Email/Password.";
+    }
+    if (errorMsg.includes('Invalid login credentials')) {
+      return "Invalid email or password. Please try again.";
+    }
+    if (errorMsg.includes('User already registered')) {
+      return "This email is already registered. Please log in instead.";
+    }
+    return errorMsg;
+  };
+
+  const handleSocialLogin = async (provider: 'google' | 'github') => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: provider,
+        options: {
+          redirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+      // Redirect happens automatically
+    } catch (err: any) {
+      console.error("Social login error:", err);
+      setError(getFriendlyErrorMessage(err.message || JSON.stringify(err)));
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,9 +75,10 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode = 'login' }) => 
         if (error) throw error;
 
         if (data.user && !data.session) {
-          setInfoMessage("Please check your email to confirm your account.");
+          setInfoMessage("Account created! Please check your email to confirm your account before logging in.");
+          setMode('login'); // Switch to login mode
         } else if (data.user) {
-           // Auto login success if session exists
+           // Auto login success if session exists (Auto Confirm enabled)
            const user: User = {
              name: data.user.user_metadata.full_name || formData.name,
              email: data.user.email || formData.email,
@@ -73,7 +106,8 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode = 'login' }) => 
         }
       }
     } catch (err: any) {
-      setError(err.message || "An error occurred during authentication.");
+      console.error("Auth error:", err);
+      setError(getFriendlyErrorMessage(err.message || "An error occurred during authentication."));
     } finally {
       setLoading(false);
     }
@@ -95,11 +129,19 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode = 'login' }) => 
 
         {/* Social Login */}
         <div className="grid grid-cols-2 gap-4 mb-6">
-          <button className="flex items-center justify-center gap-2 p-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-white transition-colors">
-            <Chrome className="w-5 h-5" /> Google
+          <button 
+            type="button"
+            onClick={() => handleSocialLogin('google')}
+            className="flex items-center justify-center gap-2 p-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-white transition-colors group"
+          >
+            <Chrome className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" /> Google
           </button>
-          <button className="flex items-center justify-center gap-2 p-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-white transition-colors">
-            <Github className="w-5 h-5" /> GitHub
+          <button 
+            type="button"
+            onClick={() => handleSocialLogin('github')}
+            className="flex items-center justify-center gap-2 p-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-white transition-colors group"
+          >
+            <Github className="w-5 h-5 text-slate-400 group-hover:text-white transition-colors" /> GitHub
           </button>
         </div>
 
@@ -108,21 +150,21 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode = 'login' }) => 
             <div className="w-full border-t border-slate-800"></div>
           </div>
           <div className="relative flex justify-center text-sm">
-            <span className="px-2 bg-slate-900 text-slate-500">Or continue with</span>
+            <span className="px-2 bg-slate-900 text-slate-500">Or continue with email</span>
           </div>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center gap-2 text-sm text-red-200">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            {error}
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3 text-sm text-red-200">
+            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+            <span>{error}</span>
           </div>
         )}
 
         {infoMessage && (
-          <div className="mb-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg flex items-center gap-2 text-sm text-blue-200">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            {infoMessage}
+          <div className="mb-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl flex items-start gap-3 text-sm text-blue-200">
+            <Info className="w-5 h-5 shrink-0 mt-0.5" />
+            <span>{infoMessage}</span>
           </div>
         )}
 
@@ -136,7 +178,7 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode = 'login' }) => 
                 </div>
                 <input
                   type="text"
-                  required
+                  required={mode === 'signup'}
                   placeholder="John Doe"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
                   value={formData.name}
@@ -172,12 +214,16 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode = 'login' }) => 
               <input
                 type="password"
                 required
+                minLength={6}
                 placeholder="••••••••"
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl py-3 pl-10 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
                 value={formData.password}
                 onChange={(e) => setFormData({...formData, password: e.target.value})}
               />
             </div>
+            {mode === 'signup' && (
+              <p className="text-[10px] text-slate-500 mt-1 ml-1">Must be at least 6 characters.</p>
+            )}
           </div>
 
           <button
@@ -203,6 +249,7 @@ const Auth: React.FC<AuthProps> = ({ onAuthSuccess, initialMode = 'login' }) => 
                 setMode(mode === 'login' ? 'signup' : 'login');
                 setError(null);
                 setInfoMessage(null);
+                setFormData({name: '', email: '', password: ''});
               }}
               className="text-purple-400 hover:text-purple-300 font-semibold transition-colors"
             >

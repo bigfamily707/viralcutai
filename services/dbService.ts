@@ -74,6 +74,25 @@ export const getUserProfile = async (userId: string) => {
   return data;
 };
 
+export const createUserProfile = async (user: any) => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .insert([
+      { 
+        id: user.id, 
+        email: user.email,
+        full_name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0],
+        plan: 'free',
+        used_minutes: 0
+      }
+    ])
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
 export const updateUserUsage = async (userId: string, minutesToAdd: number) => {
   // 1. Get current usage
   const { data: profile, error: fetchError } = await supabase

@@ -92,18 +92,44 @@ const App: React.FC = () => {
 
   const initializeUser = async (authUser: any) => {
     setUserId(authUser.id);
-    const profile = await db.getUserProfile(authUser.id);
+    
+    // 1. Try to get existing profile
+    let profile = await db.getUserProfile(authUser.id);
+    
+    // 2. If no profile (New OAuth User), create one
+    if (!profile) {
+        console.log("User profile not found, creating new one...");
+        try {
+            profile = await db.createUserProfile(authUser);
+        } catch (e) {
+            console.error("Failed to create profile:", e);
+            // Fallback for UI even if DB fails
+            profile = {
+                id: authUser.id,
+                full_name: authUser.user_metadata?.full_name || authUser.email?.split('@')[0],
+                email: authUser.email,
+                plan: 'free',
+                used_minutes: 0
+            };
+        }
+    }
+
     if (profile) {
       const mappedUser: User = {
-        name: profile.full_name || authUser.email?.split('@')[0] || 'User',
+        name: profile.full_name || authUser.user_metadata?.full_name || authUser.email?.split('@')[0] || 'User',
         email: authUser.email || '',
         plan: (profile.plan as UserPlan) || 'free',
       };
+      
       setUser(mappedUser);
       setUserPlan(mappedUser.plan);
       setUsedMinutes(profile.used_minutes || 0);
       loadUserClips(authUser.id);
-      if (window.location.pathname === '/') setCurrentView(AppView.WORKSPACE);
+      
+      // Auto-navigate to workspace if on public pages
+      setCurrentView((prev) => 
+        (prev === AppView.LANDING || prev === AppView.AUTH) ? AppView.WORKSPACE : prev
+      );
     }
   };
 
