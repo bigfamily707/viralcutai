@@ -72,14 +72,10 @@ const App: React.FC = () => {
 
   // Supabase Auth & Data Sync
   useEffect(() => {
-    // 1. Initial Session Check
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        initializeUser(session.user);
-      }
+      if (session?.user) initializeUser(session.user);
     });
 
-    // 2. Auth State Change Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
         await initializeUser(session.user);
@@ -96,10 +92,7 @@ const App: React.FC = () => {
 
   const initializeUser = async (authUser: any) => {
     setUserId(authUser.id);
-    
-    // Fetch fresh profile data from DB (more reliable than metadata)
     const profile = await db.getUserProfile(authUser.id);
-    
     if (profile) {
       const mappedUser: User = {
         name: profile.full_name || authUser.email?.split('@')[0] || 'User',
@@ -109,13 +102,8 @@ const App: React.FC = () => {
       setUser(mappedUser);
       setUserPlan(mappedUser.plan);
       setUsedMinutes(profile.used_minutes || 0);
-      
-      // Load their clips
       loadUserClips(authUser.id);
-      
-      if (window.location.pathname === '/') {
-        setCurrentView(AppView.WORKSPACE);
-      }
+      if (window.location.pathname === '/') setCurrentView(AppView.WORKSPACE);
     }
   };
 
@@ -128,7 +116,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Cleanup object URL on unmount or restart
   useEffect(() => {
     return () => {
       if (videoObjectUrl && !videoObjectUrl.startsWith('http')) {
@@ -145,7 +132,6 @@ const App: React.FC = () => {
 
   // --- Auth Handlers ---
   const handleAuthSuccess = (authenticatedUser: User) => {
-    // onAuthStateChange handles the actual state updates
     setCurrentView(AppView.WORKSPACE);
     showToast(`Welcome back!`, 'success');
   };
@@ -185,15 +171,11 @@ const App: React.FC = () => {
       setCurrentView(AppView.AUTH);
       return;
     }
-    
     try {
       await db.updateUserPlan(userId, plan);
-      
-      // Optimistic Update
       const updatedUser = { ...user, plan };
       setUser(updatedUser);
       setUserPlan(plan);
-      
       showToast(`Upgraded to ${plan.toUpperCase()} plan!`, 'success');
       setCurrentView(AppView.WORKSPACE);
       setCurrentStep(AppStep.UPLOAD);
@@ -203,7 +185,6 @@ const App: React.FC = () => {
   };
 
   const handleDownload = (clip: VideoClip) => {
-    // 1. If backend provided a direct download link (videoUrl), use it
     if (clip.videoUrl && clip.videoUrl.startsWith('http')) {
        showToast('Downloading generated clip...', 'success');
        const link = document.createElement('a');
@@ -214,51 +195,22 @@ const App: React.FC = () => {
        document.body.removeChild(link);
        return;
     }
-
-    // 2. If we have a local uploaded file, allow downloading it as an MP4 (Fallback)
     if (uploadedFile) {
-      const safeTitle = clip.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
       const url = URL.createObjectURL(uploadedFile);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${safeTitle}_source.mp4`;
+      link.download = `source_video.mp4`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
-      showToast('Downloading source file (Clip not rendered)', 'info');
+      showToast('Downloading source file', 'info');
       return;
     }
-
-    // 3. Fallback: Download metadata receipt
-    const fileContent = `
-VIRAL CUT PROJECT - DOWNLOAD RECEIPT
-====================================
-User: ${user?.name || 'Guest'}
-User Plan: ${userPlan.toUpperCase()}
-Clip ID: ${clip.id}
-Title: ${clip.title}
-Duration: ${clip.duration}
-Range: ${clip.startTime}s - ${clip.endTime}s
-Transcript: ${clip.transcript}
-    `.trim();
-
-    const blob = new Blob([fileContent], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${clip.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`; 
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    
     showToast('Download started (Metadata)', 'success');
   };
 
   const startProcessing = async () => {
-    // 1. Check Limits
     const estimatedVideoLength = 5; 
     
     if (userPlan === 'free' && (usedMinutes + estimatedVideoLength) > FREE_LIMIT_MINUTES) {
@@ -273,23 +225,21 @@ Transcript: ${clip.transcript}
       return;
     }
 
-    // 2. Start Processing UI
     setCurrentStep(AppStep.PROCESSING);
     setProcessingProgress(0);
 
     try {
         let serverFilename = uploadedFilename;
 
-        // Step A: Upload Video to Backend (if not already uploaded)
+        // Step A: Immediate Validation
         if (!serverFilename) {
-          setProcessingStatus('Fast-uploading video to cloud...');
+          setProcessingStatus('Connecting to video source...');
           setProcessingProgress(10);
           
           let uploadRes;
           if (uploadedFile) {
             uploadRes = await api.uploadVideo(uploadedFile);
           } else if (videoUrl) {
-            setProcessingStatus('Stream-ripping video from URL...');
             uploadRes = await api.importVideoUrl(videoUrl);
           } else {
             throw new Error("No video source provided");
@@ -299,24 +249,59 @@ Transcript: ${clip.transcript}
           setUploadedFilename(serverFilename);
         }
 
-        // Step B: AI Analysis
-        setProcessingStatus('Gemini is generating 3 viral variations...');
-        setProcessingProgress(40);
-        // Process Metadata parallel to video setup
-        const mockClipsMetadata = await generateMockClipsMetadata();
-        setProcessingProgress(60);
+        setProcessingStatus('Parallel AI Processing & Video Rendering...');
+        setProcessingProgress(25);
 
-        // Step C: Server-Side Processing (FFmpeg)
-        setProcessingStatus('High-speed rendering (Ultrafast Mode)...');
-        const processedClips = await api.processVideoClips(
+        // --- CORE OPTIMIZATION: PARALLEL EXECUTION ---
+        
+        // 1. Define segments (In a real app, these come from analysis of the full transcript)
+        // Here we mock the detection step to speed up the demo
+        const segments = [
+          { id: '1', timeRange: [0, 15], context: "Intro and Hook" },
+          { id: '2', timeRange: [15, 25], context: "Core Problem Statement" },
+          { id: '3', timeRange: [25, 33], context: "Quick Solution/Tip" }
+        ];
+
+        // 2. Start Video Processing (Heavy Backend Task)
+        // We pass the segments immediately to FFmpeg
+        const videoPromise = api.processVideoClips(
            serverFilename!, 
-           mockClipsMetadata, 
+           segments.map(s => ({ 
+             ...s, 
+             title: 'Processing...', 
+             startTime: s.timeRange[0], 
+             endTime: s.timeRange[1],
+             // Temp values required by type
+             thumbnailUrl: '', duration: '', viralScore: 0, hashtags: [], summary: '', transcript: '' 
+           }) as any), 
            config.aspectRatio
         );
+
+        // 3. Start AI Metadata Generation (Latent API Task)
+        const metadataPromise = generateMockClipsMetadata(segments);
+
+        // 4. Wait for both to finish
+        const [processedClips, metadataClips] = await Promise.all([videoPromise, metadataPromise]);
+        
         setProcessingProgress(90);
 
-        // Step D: Save to Database (Supabase)
-        setProcessingStatus('Finalizing...');
+        // 5. Merge Data
+        const finalClips = processedClips.map((clip, index) => {
+           // Match based on ID or index
+           const meta = metadataClips.find(m => m.id === clip.id) || metadataClips[index];
+           return {
+             ...clip,
+             title: meta.title,
+             hashtags: meta.hashtags,
+             summary: meta.summary,
+             viralScore: meta.viralScore,
+             transcript: meta.transcript,
+             duration: meta.duration
+           };
+        });
+
+        // Step D: Save to Database
+        setProcessingStatus('Saving project...');
         
         const project = await db.createProject(
           userId, 
@@ -324,7 +309,7 @@ Transcript: ${clip.transcript}
           videoUrl
         );
 
-        const savedClips = await db.saveGeneratedClips(project.id, userId, processedClips);
+        const savedClips = await db.saveGeneratedClips(project.id, userId, finalClips);
         
         // Step E: Update Usage
         if (userPlan === 'free') {
@@ -335,9 +320,8 @@ Transcript: ${clip.transcript}
         setGeneratedClips(prev => [...savedClips, ...prev]);
         setProcessingProgress(100);
         
-        // Immediate transition, no artificial delay
         setCurrentStep(AppStep.DASHBOARD);
-        showToast('Processing complete! Clips generated.', 'success');
+        showToast('Viral clips generated successfully!', 'success');
 
     } catch (e: any) {
         console.error(e);
@@ -346,24 +330,11 @@ Transcript: ${clip.transcript}
     }
   };
 
-  // Optimized to run in parallel
-  const generateMockClipsMetadata = async (): Promise<VideoClip[]> => {
-    // Define base segments we want to 'find'
-    const segments = [
-      { id: '1', timeRange: [0, 15], context: "Intro and Hook" },
-      { id: '2', timeRange: [15, 25], context: "Core Problem Statement" },
-      { id: '3', timeRange: [25, 33], context: "Quick Solution/Tip" }
-    ];
-
-    // Fire all Gemini requests in parallel for speed
+  // Helper: Generates just the metadata parts
+  const generateMockClipsMetadata = async (segments: any[]): Promise<VideoClip[]> => {
+    // Fire all Gemini requests in parallel
     const metadataPromises = segments.map(seg => 
-      generateViralMetadata(MOCK_TRANSCRIPT_SEGMENT, `Viral Short Video: ${seg.context}`)
-        .catch(() => ({
-          title: `Viral Clip ${seg.id}`,
-          hashtags: ["#viral", "#shorts"],
-          description: "Auto-generated clip",
-          viralScoreReasoning: "Fast fallback"
-        }))
+      generateViralMetadata(MOCK_TRANSCRIPT_SEGMENT, `Viral Short: ${seg.context}`)
     );
 
     const metadataResults = await Promise.all(metadataPromises);
@@ -373,9 +344,9 @@ Transcript: ${clip.transcript}
       return {
         id: seg.id,
         title: meta.title,
-        thumbnailUrl: '', // Will be filled by backend
+        thumbnailUrl: '', 
         duration: `0:${(seg.timeRange[1] - seg.timeRange[0])}`,
-        viralScore: 85 + Math.floor(Math.random() * 14), // Random high score
+        viralScore: 85 + Math.floor(Math.random() * 14),
         hashtags: meta.hashtags,
         summary: meta.description,
         transcript: MOCK_TRANSCRIPT_SEGMENT.substring(0, 100) + "...",
@@ -387,7 +358,7 @@ Transcript: ${clip.transcript}
 
   const handleRestart = () => {
     setUploadedFile(null);
-    setUploadedFilename(null); // Reset backend file reference
+    setUploadedFilename(null);
     if (videoObjectUrl && !videoObjectUrl.startsWith('http')) URL.revokeObjectURL(videoObjectUrl);
     setVideoObjectUrl(null);
     setVideoUrl('');
@@ -467,7 +438,6 @@ Transcript: ${clip.transcript}
                 <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-slate-300 cursor-pointer">
                   {user.name.charAt(0).toUpperCase()}
                 </div>
-                {/* Dropdown */}
                 <div className="absolute right-0 top-full mt-2 w-48 bg-slate-900 border border-slate-800 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 transform translate-y-2 group-hover:translate-y-0 z-50">
                   <div className="p-3 border-b border-white/5">
                     <p className="text-sm font-bold text-white truncate">{user.name}</p>
@@ -506,7 +476,6 @@ Transcript: ${clip.transcript}
     );
   };
 
-  // --- Workspace Logic ---
   const renderWorkspace = () => {
     switch(currentStep) {
       case AppStep.UPLOAD:
@@ -522,7 +491,6 @@ Transcript: ${clip.transcript}
             <p className="text-lg text-slate-400 mb-12 max-w-2xl mx-auto">
               Upload your video. We'll find the best clips.
             </p>
-            
             <UploadZone 
               onFileSelect={handleFileSelect} 
               onUrlSubmit={handleUrlSubmit} 
@@ -535,14 +503,12 @@ Transcript: ${clip.transcript}
               <button onClick={() => setCurrentStep(AppStep.UPLOAD)} className="text-slate-500 hover:text-white mb-6 flex items-center gap-1 text-sm">
                 ← Back to upload
               </button>
-              
               <div className="grid md:grid-cols-2 gap-12">
                 <div className="space-y-8">
                   <div>
                     <h2 className="text-2xl font-bold text-white mb-2">Video Configuration</h2>
                     <p className="text-slate-400 text-sm">Customize how AI should process your video.</p>
                   </div>
-
                   <div>
                     <label className="text-sm font-semibold text-slate-300 mb-3 block">Target Format</label>
                     <div className="grid grid-cols-3 gap-3">
@@ -562,7 +528,6 @@ Transcript: ${clip.transcript}
                       ))}
                     </div>
                   </div>
-
                   <div className="space-y-4">
                      <div className="flex items-center justify-between p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
                        <div className="flex items-center gap-3">
@@ -581,27 +546,8 @@ Transcript: ${clip.transcript}
                          <div className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${config.faceDetection ? 'translate-x-6' : ''}`} />
                        </button>
                      </div>
-
-                     <div className="flex items-center justify-between p-4 bg-slate-900/50 border border-slate-800 rounded-xl">
-                       <div className="flex items-center gap-3">
-                         <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
-                           <Sparkles className="w-5 h-5" />
-                         </div>
-                         <div>
-                           <h4 className="text-sm font-semibold text-white">Magic Captions</h4>
-                           <p className="text-xs text-slate-500">Auto-generate and animate subtitles</p>
-                         </div>
-                       </div>
-                       <button 
-                        onClick={() => setConfig({...config, autoCaptions: !config.autoCaptions})}
-                        className={`w-12 h-6 rounded-full transition-colors relative ${config.autoCaptions ? 'bg-purple-600' : 'bg-slate-700'}`}
-                       >
-                         <div className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${config.autoCaptions ? 'translate-x-6' : ''}`} />
-                       </button>
-                     </div>
                   </div>
                 </div>
-
                 <div className="space-y-8">
                   <div>
                     <label className="text-sm font-semibold text-slate-300 mb-3 block">AI Clipping Template</label>
@@ -629,7 +575,6 @@ Transcript: ${clip.transcript}
                       ))}
                     </div>
                   </div>
-
                   <div className="pt-4">
                      {userPlan === 'free' && usedMinutes >= FREE_LIMIT_MINUTES ? (
                        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-center space-y-3">
@@ -677,24 +622,22 @@ Transcript: ${clip.transcript}
                     <span className="text-2xl font-bold text-white">{Math.round(processingProgress)}%</span>
                   </div>
               </div>
-              
               <div>
                 <h3 className="text-xl font-bold text-white mb-2">{processingStatus}</h3>
                 <p className="text-slate-400 text-sm">Please keep this tab open while we work our magic.</p>
               </div>
-
               <div className="bg-slate-900/50 rounded-xl p-4 text-left border border-slate-800">
                   <div className="flex items-center gap-3 mb-2 text-slate-300 text-sm">
                     <CircleCheck className="w-4 h-4 text-green-500" />
                     <span>Video uploaded successfully</span>
                   </div>
-                  <div className={`flex items-center gap-3 mb-2 text-sm ${processingProgress > 30 ? 'text-slate-300' : 'text-slate-600'}`}>
-                    {processingProgress > 30 ? <CircleCheck className="w-4 h-4 text-green-500" /> : <div className="w-4 h-4 rounded-full border border-slate-600" />}
-                    <span>Audio transcription complete</span>
+                  <div className={`flex items-center gap-3 mb-2 text-sm ${processingProgress > 20 ? 'text-slate-300' : 'text-slate-600'}`}>
+                    {processingProgress > 20 ? <CircleCheck className="w-4 h-4 text-green-500" /> : <div className="w-4 h-4 rounded-full border border-slate-600" />}
+                    <span>AI Video Processing (Parallel)</span>
                   </div>
-                  <div className={`flex items-center gap-3 text-sm ${processingProgress > 70 ? 'text-slate-300' : 'text-slate-600'}`}>
-                    {processingProgress > 70 ? <CircleCheck className="w-4 h-4 text-green-500" /> : <div className="w-4 h-4 rounded-full border border-slate-600" />}
-                    <span>AI Curation & Editing</span>
+                  <div className={`flex items-center gap-3 text-sm ${processingProgress > 80 ? 'text-slate-300' : 'text-slate-600'}`}>
+                    {processingProgress > 80 ? <CircleCheck className="w-4 h-4 text-green-500" /> : <div className="w-4 h-4 rounded-full border border-slate-600" />}
+                    <span>Gemini Analysis Complete</span>
                   </div>
               </div>
             </div>
@@ -741,84 +684,28 @@ Transcript: ${clip.transcript}
                   ))}
                 </div>
               )}
-
-              <div className="mt-16 bg-slate-900/50 border border-slate-800 rounded-2xl p-8">
-                <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-xl font-bold text-white">Viral Potential Analysis</h3>
-                    <span className="text-xs font-mono text-purple-400 bg-purple-500/10 px-2 py-1 rounded">POWERED BY GEMINI 2.5</span>
-                </div>
-                <div className="grid md:grid-cols-3 gap-8">
-                    <div className="md:col-span-2">
-                      <p className="text-slate-400 text-sm mb-4">
-                        We analyzed the audio waveform and transcript sentiment to identify peaks in user retention.
-                        The clips generated correspond to the highest peaks in the graph below.
-                      </p>
-                      <EngagementChart 
-                        data={[
-                          { time: '0:00', engagement: 20 },
-                          { time: '0:30', engagement: 45 },
-                          { time: '1:00', engagement: 30 },
-                          { time: '2:00', engagement: 85 }, // Peak 1
-                          { time: '2:30', engagement: 60 },
-                          { time: '3:00', engagement: 40 },
-                          { time: '5:00', engagement: 90 }, // Peak 2
-                          { time: '5:30', engagement: 55 },
-                          { time: '6:00', engagement: 35 },
-                          { time: '8:30', engagement: 78 }, // Peak 3
-                          { time: '9:00', engagement: 40 },
-                          { time: '10:00', engagement: 20 },
-                        ]}
-                      />
-                    </div>
-                    <div className="space-y-4">
-                      <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <h4 className="text-white font-semibold text-sm mb-1">Top Performing Topic</h4>
-                        <p className="text-purple-400 text-lg font-bold">Productivity Systems</p>
-                        <p className="text-xs text-slate-500 mt-1">Segments mentioning 'systems' had 40% higher retention.</p>
-                      </div>
-                      <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                        <h4 className="text-white font-semibold text-sm mb-1">Suggested Caption Tone</h4>
-                        <p className="text-blue-400 text-lg font-bold">Authoritative & Urgent</p>
-                        <p className="text-xs text-slate-500 mt-1">Using imperative verbs drove higher engagement scores.</p>
-                      </div>
-                    </div>
-                </div>
-              </div>
             </div>
         );
       default: return null;
     }
   };
 
-  // Main Render Logic
   const renderContent = () => {
     switch(currentView) {
-      case AppView.AUTH:
-        return <Auth onAuthSuccess={handleAuthSuccess} />;
-      case AppView.LANDING: 
-        return <LandingPage onGetStarted={handleGetStarted} onLogin={() => setCurrentView(AppView.AUTH)} />;
-      case AppView.TEMPLATES: 
-        return <TemplatesPage />;
-      case AppView.PRICING: 
-        return <Pricing currentPlan={userPlan} onUpgrade={handleUpgrade} />;
-      case AppView.SHOWCASE: 
-        return <Showcase />;
-      case AppView.WORKSPACE:
-        return renderWorkspace();
-      default:
-        return <LandingPage onGetStarted={handleGetStarted} onLogin={() => setCurrentView(AppView.AUTH)} />;
+      case AppView.AUTH: return <Auth onAuthSuccess={handleAuthSuccess} />;
+      case AppView.LANDING: return <LandingPage onGetStarted={handleGetStarted} onLogin={() => setCurrentView(AppView.AUTH)} />;
+      case AppView.TEMPLATES: return <TemplatesPage />;
+      case AppView.PRICING: return <Pricing currentPlan={userPlan} onUpgrade={handleUpgrade} />;
+      case AppView.SHOWCASE: return <Showcase />;
+      case AppView.WORKSPACE: return renderWorkspace();
+      default: return <LandingPage onGetStarted={handleGetStarted} onLogin={() => setCurrentView(AppView.AUTH)} />;
     }
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-purple-500/30">
       {renderHeader()}
-      
-      <main className="pt-24 pb-12">
-        {renderContent()}
-      </main>
-
-      {/* Video Player Modal */}
+      <main className="pt-24 pb-12">{renderContent()}</main>
       {selectedClip && (
         <VideoModal 
           clip={selectedClip} 
@@ -827,15 +714,9 @@ Transcript: ${clip.transcript}
           onDownload={handleDownload}
         />
       )}
-
-      {/* Toast Notification Container */}
       {toast && (
         <div className="fixed bottom-6 right-6 z-[200]">
-          <Toast 
-            message={toast.msg} 
-            type={toast.type} 
-            onClose={() => setToast(null)} 
-          />
+          <Toast message={toast.msg} type={toast.type} onClose={() => setToast(null)} />
         </div>
       )}
     </div>

@@ -25,9 +25,9 @@ const PORT = 3001;
 // Middleware
 app.use(cors());
 app.use(express.json());
-app.use('/generated', express.static(OUTPUT_DIR)); // Serve generated clips
+app.use('/generated', express.static(OUTPUT_DIR));
 
-// Multer setup for file uploads
+// Multer setup
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
   filename: (req, file, cb) => cb(null, `${uuidv4()}-${file.originalname}`)
@@ -35,11 +35,10 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 /**
- * 1. Upload Route - Handles local file uploads
+ * 1. Upload Route
  */
 app.post('/api/upload', upload.single('video'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  
   res.json({
     message: 'File uploaded successfully',
     filename: req.file.filename,
@@ -49,73 +48,40 @@ app.post('/api/upload', upload.single('video'), (req, res) => {
 });
 
 /**
- * 2. Import URL Route - Handles YouTube/Direct URLs
+ * 2. Import URL Route
  */
 app.post('/api/import-url', async (req, res) => {
   const { url } = req.body;
-  
   if (!url) return res.status(400).json({ error: 'URL is required' });
-
-  const filename = `${uuidv4()}.mp4`;
-  const filePath = path.join(UPLOAD_DIR, filename);
 
   try {
     if (ytdl.validateURL(url)) {
-      // Handle YouTube
-      console.log(`Downloading YouTube video: ${url}`);
-      // OPTIMIZATION: Use '18' (360p MP4) or 'lowest' audioandvideo to avoid expensive merging
-      // This is much faster for a "Viral Short" tool where 1080p isn't always strictly required for the source if speed is key
-      ytdl(url, { 
-        quality: '18', 
-        filter: 'audioandvideo' 
-      }) 
-        .pipe(fs.createWriteStream(filePath))
-        .on('finish', () => {
-          res.json({ filename, path: filePath, type: 'youtube' });
-        })
-        .on('error', (err) => {
-          console.error("YTDL Error:", err);
-          // Fallback if specific format fails
-          ytdl(url, { quality: 'lowest' })
-            .pipe(fs.createWriteStream(filePath))
-            .on('finish', () => res.json({ filename, path: filePath, type: 'youtube' }))
-            .on('error', (e) => res.status(500).json({ error: 'Failed to download YouTube video' }));
-        });
+      const info = await ytdl.getBasicInfo(url);
+      res.json({ 
+        filename: url, 
+        path: url, 
+        type: 'youtube',
+        metadata: { title: info.videoDetails.title }
+      });
     } else {
-      // Handle Direct URL (using FFmpeg to download/convert)
-      console.log(`Downloading Direct URL: ${url}`);
-      ffmpeg(url)
-        .inputOptions(['-re']) // Read at native framerate (sometimes helps with streams)
-        .outputOptions(['-c copy']) // Try to copy stream first for speed
-        .output(filePath)
-        .on('end', () => {
-          res.json({ filename, path: filePath, type: 'url' });
-        })
-        .on('error', (err) => {
-          console.error("Direct Download Error, retrying with re-encode:", err);
-          // Retry without copy if codec is incompatible
-          ffmpeg(url)
-            .outputOptions(['-preset ultrafast'])
-            .output(filePath)
-            .on('end', () => res.json({ filename, path: filePath, type: 'url' }))
-            .on('error', (e) => res.status(500).json({ error: 'Failed to download direct video' }))
-            .run();
-        })
-        .run();
+      res.json({ filename: url, path: url, type: 'url' });
     }
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Import Error:", err);
+    res.status(500).json({ error: 'Failed to access video URL' });
   }
 });
 
 /**
- * 3. Process Clips Route - Trims and crops video
+ * 3. Process Clips Route - Optimized for Speed
  */
 app.post('/api/process-clips', async (req, res) => {
   const { sourceFilename, clips, aspectRatio } = req.body;
-  const sourcePath = path.join(UPLOAD_DIR, sourceFilename);
+  
+  const isUrl = sourceFilename.startsWith('http');
+  const sourcePath = isUrl ? sourceFilename : path.join(UPLOAD_DIR, sourceFilename);
 
-  if (!fs.existsSync(sourcePath)) {
+  if (!isUrl && !fs.existsSync(sourcePath)) {
     return res.status(404).json({ error: 'Source file not found' });
   }
 
@@ -123,29 +89,67 @@ app.post('/api/process-clips', async (req, res) => {
   let completed = 0;
   let hasError = false;
 
-  console.log(`Processing ${clips.length} clips from ${sourceFilename}`);
+  console.log(`Processing ${clips.length} clips via ${isUrl ? 'STREAMING' : 'LOCAL FILE'}`);
 
-  // Limit concurrency to prevent CPU choking, though for 3 clips it's usually fine.
-  // We process them all at once for speed.
+  // Resolve Stream URL
+  let ffmpegInput = sourcePath;
+  if (isUrl && ytdl.validateURL(sourcePath)) {
+      try {
+          const info = await ytdl.getInfo(sourcePath);
+          // Try to get 360p (itag 18) for speed, fallback to any audio/video combo
+          let format;
+          try {
+            format = ytdl.chooseFormat(info.formats, { quality: '18' });
+          } catch (e) {
+            format = ytdl.filterFormats(info.formats, 'audioandvideo')[0];
+          }
+          
+          if (format && format.url) {
+              ffmpegInput = format.url;
+              console.log("Resolved direct stream URL.");
+          }
+      } catch (e) {
+          console.error("Stream resolution failed, falling back to direct URL:", e.message);
+      }
+  }
+
   clips.forEach((clip) => {
     const outputFilename = `clip-${clip.id}-${Date.now()}.mp4`;
     const outputPath = path.join(OUTPUT_DIR, outputFilename);
+    const duration = clip.endTime - clip.startTime;
 
-    // Build FFmpeg command
-    let command = ffmpeg(sourcePath)
-      .setStartTime(clip.startTime)
-      .setDuration(clip.endTime - clip.startTime)
-      .output(outputPath)
-      // SPEED OPTIMIZATIONS
+    let command = ffmpeg();
+
+    // INPUT OPTIONS
+    const inputOptions = [
+        '-ss', String(clip.startTime), // Fast Seek
+    ];
+
+    // For streams, reduce probe time to start instantly
+    if (isUrl) {
+        inputOptions.push('-analyzeduration', '0');
+        inputOptions.push('-probesize', '32');
+    }
+
+    command
+      .input(ffmpegInput)
+      .inputOptions(inputOptions);
+
+    // OUTPUT OPTIONS
+    // Removed '-movflags +faststart' because it requires a second pass (slow!)
+    command
       .outputOptions([
-        '-preset ultrafast', // Trade compression efficiency for max speed
-        '-crf 28',           // Slightly lower quality is fine for viral shorts/previews
-        '-tune zerolatency', // Optimize for fast streaming/encoding
-        '-movflags +faststart'
+        '-t', String(duration),
+        '-preset', 'ultrafast', // Maximum encoding speed
+        '-crf', '30',           // Lower quality for fast previews
+        '-c:v', 'libx264',
+        '-c:a', 'aac',
+        '-b:a', '96k',          // Lower audio bitrate
+        '-ac', '1',             // Mono audio is faster
+        '-pix_fmt', 'yuv420p'
       ]);
 
-    // Apply Crop for 9:16 (Vertical) if requested
-    // Logic: Keep height, calculate width = height * (9/16), center horizontally
+    // Apply Crop
     if (aspectRatio === '9:16') {
         command.videoFilters('crop=ih*(9/16):ih:(iw-ow)/2:0');
     } else if (aspectRatio === '1:1') {
@@ -153,6 +157,7 @@ app.post('/api/process-clips', async (req, res) => {
     }
 
     command
+      .output(outputPath)
       .on('end', () => {
         if (hasError) return;
         
@@ -165,11 +170,12 @@ app.post('/api/process-clips', async (req, res) => {
 
         completed++;
         if (completed === clips.length) {
-          res.json({ clips: processedClips });
+          const sorted = processedClips.sort((a,b) => parseInt(a.id) - parseInt(b.id));
+          res.json({ clips: sorted });
         }
       })
       .on('error', (err) => {
-        console.error(`Error processing clip ${clip.id}:`, err);
+        console.error(`Clip ${clip.id} error:`, err.message);
         if (!hasError) {
           hasError = true;
           res.status(500).json({ error: 'Processing failed' });
