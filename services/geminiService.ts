@@ -1,8 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Initialize Gemini Client
-const GEMINI_API_KEY = 'AIzaSyCqs37-6TH6GOgZ4nv3ouLxAoyd3NYvBwU';
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+// Initialize Gemini Client with Environment Variable
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export interface ViralMetadataResponse {
   title: string;
@@ -29,7 +28,7 @@ export const generateViralMetadata = async (transcript: string, context: string)
     `;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.0-flash-exp', // Using a fast model compatible with the new SDK
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -53,6 +52,7 @@ export const generateViralMetadata = async (transcript: string, context: string)
 
   } catch (error) {
     console.error("Gemini API Error:", error);
+    // Fallback if API key is missing or quota exceeded during demo
     return {
       title: "🔥 Must Watch Clip",
       hashtags: ["#viral", "#shorts", "#fyp"],
